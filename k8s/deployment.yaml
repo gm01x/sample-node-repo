@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: sample-node-app
-        image: ghcr.io/YOUR_USERNAME/YOUR_REPO:latest
+        image: ghcr.io/gm01x/sample-node-repo:latest
         ports:
         - containerPort: 3000
         env:
