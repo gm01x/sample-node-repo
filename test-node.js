@@ -53,7 +53,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="container">
-            <h1>Hello Node.js Super APP</h1>
+            <h1>Hello Node.js Super TEST</h1>
             <p class="subtitle">Welcome to your Node.js application</p>
             <div class="footer">
                 <p>Version: ${process.env.APP_VERSION || '1.0.0'}</p>
