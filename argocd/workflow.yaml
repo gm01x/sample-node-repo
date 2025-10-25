@@ -79,19 +79,30 @@ spec:
             wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
             chmod +x /usr/local/bin/yq
             
+            # Configure Git
             git config --global user.name "argo-workflows"
             git config --global user.email "argo@workflows.local"
-            
-            REPO_URL="https://github.com/{{workflow.parameters.github-repo}}.git"
-            echo "Cloning ${REPO_URL}"
-            git clone ${REPO_URL} /tmp/repo
+            git config --global credential.helper store
+
+            # Debug: Check if token is available
+            echo "GITHUB_TOKEN length: ${#GITHUB_TOKEN}"
+            if [ -z "$GITHUB_TOKEN" ]; then
+              echo "ERROR: GITHUB_TOKEN is not set!"
+              exit 1
+            fi
+
+            # Clone repository
+            echo "Cloning repository..."
+            git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/{{workflow.parameters.github-repo}}.git" /tmp/repo
             cd /tmp/repo
             
             NEW_IMAGE="ghcr.io/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}:{{workflow.parameters.image-tag}}"
             echo "Updating image to: ${NEW_IMAGE}"
             
-            yq eval ".spec.template.spec.containers[0].image = \"${NEW_IMAGE}\"" \
-              -i {{workflow.parameters.deployment-file}}
+            # Update ONLY the Deployment image, not the Service
+            # Target specifically the Deployment's container image
+            yq eval -i '(select(.kind == "Deployment") | .spec.template.spec.containers[0].image) = "'"${NEW_IMAGE}"'"' \
+              {{workflow.parameters.deployment-file}}
             
             echo "Changes:"
             git diff {{workflow.parameters.deployment-file}}
@@ -100,7 +111,7 @@ spec:
             git commit -m "Deploy {{workflow.parameters.image-tag}} [skip ci]"
             
             echo "Pushing changes to GitHub..."
-            git push https://${GITHUB_TOKEN}@github.com/{{workflow.parameters.github-repo}}.git main
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/{{workflow.parameters.github-repo}}.git" main
             
             echo "✅ Manifest updated successfully"
             echo "🔄 ArgoCD will detect the change and sync automatically"
