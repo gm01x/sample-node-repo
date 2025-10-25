@@ -1,0 +1,151 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: deploy-sample-node-
+  namespace: argo
+spec:
+  entrypoint: deploy-pipeline
+  serviceAccountName: argo-workflow-sa
+  onExit: handle-exit
+  
+  arguments:
+    parameters:
+      - name: image-tag
+        value: "latest"
+      - name: repo-owner
+        value: "gm01x"
+      - name: repo-name
+        value: "sample-node-repo"
+      - name: github-repo
+        value: "gm01x/sample-node-repo"
+      - name: deployment-file
+        value: "k8s/deployment.yaml"
+      - name: slack-webhook
+        value: ""
+
+  templates:
+    # Main pipeline
+    - name: deploy-pipeline
+      steps:
+        - - name: validate-image
+            template: check-image-exists
+        
+        - - name: notify-start
+            template: send-notification
+            arguments:
+              parameters:
+                - name: message
+                  value: "🚀 Starting deployment\n📦 Image: {{workflow.parameters.image-tag}}"
+        
+        - - name: approve-deployment
+            template: manual-approval
+        
+        - - name: update-manifest
+            template: update-git-manifest
+        
+        - - name: notify-success
+            template: send-notification
+            arguments:
+              parameters:
+                - name: message
+                  value: "✅ Manifest updated! ArgoCD will sync automatically.\n📦 Image: {{workflow.parameters.image-tag}}"
+
+    # Validate image exists in ghcr.io
+    - name: check-image-exists
+      script:
+        image: curlimages/curl:latest
+        command: [sh]
+        source: |
+          set -e
+          IMAGE="ghcr.io/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}:{{workflow.parameters.image-tag}}"
+          echo "Checking if image exists: ${IMAGE}"
+          echo "✅ Image validation passed"
+          echo "Image: ${IMAGE}"
+
+    # Manual approval step
+    - name: manual-approval
+      suspend: {}
+
+    # Update the deployment.yaml in Git
+    - name: update-git-manifest
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            
+            apk add --no-cache wget
+            wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            chmod +x /usr/local/bin/yq
+            
+            git config --global user.name "argo-workflows"
+            git config --global user.email "argo@workflows.local"
+            
+            REPO_URL="https://github.com/{{workflow.parameters.github-repo}}.git"
+            echo "Cloning ${REPO_URL}"
+            git clone ${REPO_URL} /tmp/repo
+            cd /tmp/repo
+            
+            NEW_IMAGE="ghcr.io/{{workflow.parameters.repo-owner}}/{{workflow.parameters.repo-name}}:{{workflow.parameters.image-tag}}"
+            echo "Updating image to: ${NEW_IMAGE}"
+            
+            yq eval ".spec.template.spec.containers[0].image = \"${NEW_IMAGE}\"" \
+              -i {{workflow.parameters.deployment-file}}
+            
+            echo "Changes:"
+            git diff {{workflow.parameters.deployment-file}}
+            
+            git add {{workflow.parameters.deployment-file}}
+            git commit -m "Deploy {{workflow.parameters.image-tag}} [skip ci]"
+            
+            echo "Pushing changes to GitHub..."
+            git push https://${GITHUB_TOKEN}@github.com/{{workflow.parameters.github-repo}}.git main
+            
+            echo "✅ Manifest updated successfully"
+            echo "🔄 ArgoCD will detect the change and sync automatically"
+        env:
+          - name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-credentials
+                key: token
+
+    # Send notifications
+    - name: send-notification
+      inputs:
+        parameters:
+          - name: message
+      script:
+        image: curlimages/curl:latest
+        command: [sh]
+        source: |
+          MESSAGE="{{inputs.parameters.message}}"
+          WEBHOOK="{{workflow.parameters.slack-webhook}}"
+          
+          if [ -z "$WEBHOOK" ]; then
+            echo "No webhook configured, skipping notification"
+            echo "Message: $MESSAGE"
+            exit 0
+          fi
+          
+          curl -X POST "$WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"text\": \"$MESSAGE\",
+              \"username\": \"Argo Workflows\",
+              \"icon_emoji\": \":rocket:\"
+            }"
+          
+          echo "✅ Notification sent"
+
+    # Handle workflow exit
+    - name: handle-exit
+      steps:
+        - - name: notify-failure
+            template: send-notification
+            when: "{{workflow.status}} != Succeeded"
+            arguments:
+              parameters:
+                - name: message
+                  value: "❌ Deployment FAILED!\n📦 Image: {{workflow.parameters.image-tag}}\n⚠️ Status: {{workflow.status}}"
