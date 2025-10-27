@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: sample-node-app
-          image: 'ghcr.io/gm01x/sample-node-repo: main-83c3313'
+          image: 'ghcr.io/gm01x/sample-node-repo:main-83c3313'
           ports:
             - containerPort: 3000
           env:
