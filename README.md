@@ -1,4 +1,4 @@
-# Sample Node.js Application with GitOps CI/CD Pipeline
+# Sample Node.js Application with GitOps CI/CD Pipeline (PR)
 
 A containerized Node.js application demonstrating a complete GitOps CI/CD pipeline using GitHub Actions, ArgoCD, and Argo Workflows.
 
